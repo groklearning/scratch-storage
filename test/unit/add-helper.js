@@ -3,7 +3,8 @@ const test = require('tap').test;
 const ScratchStorage = require('../../dist/node/scratch-storage');
 
 /**
- * Simulate a storage helper, adding log messages when "load" is called rather than actually loading anything.
+ * Simulate a storage helper
+ * Adds log messages when "load" or "store" is called rather than loading or storing anything.
  */
 class LoggingHelper {
     /**
@@ -34,6 +35,29 @@ class LoggingHelper {
             Promise.resolve(new this.storage.Asset(assetType, assetId, dataFormat, Buffer.from(this.label))) :
             Promise.reject(`This is an expected failure from ${this.label}`);
     }
+
+    /**
+     * Pretend to store an asset, but instead add a message to the log container.
+     * @param {AssetType} assetType - The type of asset to create or update.
+     * @param {?DataFormat} dataFormat - DataFormat of the data for the stored asset.
+     * @param {Buffer} data - The data for the cached asset.
+     * @param {?string} assetId - The ID of the asset to fetch: a project ID, MD5, etc.
+     * @return {Promise.<object>} A promise for the response from the create or update request
+     */
+    store (assetType, dataFormat, data, assetId) {
+        this.logContainer.push(this.label);
+        if (this.shouldSucceed) {
+            return Promise.resolve({
+                id: this.label,
+                assetType: assetType,
+                dataFormat: dataFormat,
+                data: data,
+                assetId: assetId
+            });
+        }
+        
+        return Promise.reject(`This is an expected failure from ${this.label}`);
+    }
 }
 
 test('ScratchStorage constructor', t => {
@@ -49,7 +73,35 @@ test('LoggingHelper constructor', t => {
     t.end();
 });
 
-test('addHelper', t => {
+test('addHelper with LoggingHelper', t => {
+    const logContainer = [];
+    const storage = new ScratchStorage();
+
+    const initialHelperCount = storage._helpers.length;
+
+    // The first two helpers should fail (shouldSucceed=false) so that the storage module continues through the list.
+    // The third helper should succeed (shouldSucceed=true) so that the overall load succeeds.
+    const loggingHelpers = [
+        new LoggingHelper(storage, 'first', false, logContainer),
+        new LoggingHelper(storage, 'second', false, logContainer),
+        new LoggingHelper(storage, 'third', true, logContainer)
+    ];
+
+    // Add out of order to check that the priority values are respected
+    storage.addHelper(loggingHelpers[2], -50);
+    storage.addHelper(loggingHelpers[0], 50);
+    storage.addHelper(loggingHelpers[1], 0);
+
+    // Did they all get added?
+    t.equal(storage._helpers.length, initialHelperCount + loggingHelpers.length);
+
+    // We shouldn't have any log entries yet
+    t.deepEqual(logContainer, []);
+
+    t.end();
+});
+
+test('load with LoggingHelper', t => {
     const logContainer = [];
     const storage = new ScratchStorage();
 
@@ -75,6 +127,41 @@ test('addHelper', t => {
     t.deepEqual(logContainer, []);
 
     return storage.load(storage.AssetType.Project, '0').then(() => {
+        // Verify that all helpers were consulted, and in the correct order
+        t.deepEqual(logContainer, [
+            'first',
+            'second',
+            'third'
+        ]);
+    });
+});
+
+test('store with LoggingHelper', t => {
+    const logContainer = [];
+    const storage = new ScratchStorage();
+
+    const initialHelperCount = storage._helpers.length;
+
+    // The first two helpers should fail (shouldSucceed=false) so that the storage module continues through the list.
+    // The third helper should succeed (shouldSucceed=true) so that the overall load succeeds.
+    const loggingHelpers = [
+        new LoggingHelper(storage, 'first', false, logContainer),
+        new LoggingHelper(storage, 'second', false, logContainer),
+        new LoggingHelper(storage, 'third', true, logContainer)
+    ];
+
+    // Add out of order to check that the priority values are respected
+    storage.addHelper(loggingHelpers[2], -50);
+    storage.addHelper(loggingHelpers[0], 50);
+    storage.addHelper(loggingHelpers[1], 0);
+
+    // Did they all get added?
+    t.equal(storage._helpers.length, initialHelperCount + loggingHelpers.length);
+
+    // We shouldn't have any log entries yet
+    t.deepEqual(logContainer, []);
+
+    return storage.store(storage.AssetType.Project, null, Buffer.from('test')).then(() => {
         // Verify that all helpers were consulted, and in the correct order
         t.deepEqual(logContainer, [
             'first',

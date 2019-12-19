@@ -99,6 +99,10 @@ class WebHelper extends Helper {
 
         let storeIndex = 0;
         const tryNextSource = () => {
+            if (storeIndex >= stores.length) {
+                return Promise.resolve(null);
+            }
+
             const store = stores[storeIndex++];
 
             /** @type {UrlFunction} */

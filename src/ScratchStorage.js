@@ -174,10 +174,38 @@ class ScratchStorage {
      *   error here, but (for example) HTTP 403 does.
      */
     load (assetType, assetId, dataFormat) {
+        dataFormat = dataFormat || assetType.runtimeFormat;
+        return this.tryEachHelper(helper => helper.load(assetType, assetId, dataFormat));
+    }
+
+    /**
+     * Store an asset by type & ID.
+     * @param {AssetType} assetType - The type of asset to store.
+     * @param {?DataFormat} [dataFormat] - Optional: store this format instead of the AssetType's default.
+     * @param {Buffer} data - Data to store for the asset
+     * @param {?string} [assetId] - The ID of the asset to store: a project ID, MD5, etc.
+     * @return {Promise.<object>} A promise for asset metadata
+     */
+    store (assetType, dataFormat, data, assetId) {
+        dataFormat = dataFormat || assetType.runtimeFormat;
+        return this.tryEachHelper(helper => helper.store(assetType, dataFormat, data, assetId))
+            .then(body => {
+                this.builtinHelper._store(assetType, dataFormat, data, body.id);
+                return body;
+            });
+    }
+
+    /**
+     * Walk through the local helpers until one is able to provide appropriate functionality.
+     *
+     * @private
+     * @param {function(!Helper): ?Promise} handler - A callback that uses the helper
+     * @return {Promise} The first promise from a helper that works
+     */
+    tryEachHelper (handler) {
         /** @type {Helper[]} */
         const helpers = this._helpers.map(x => x.helper);
         const errors = [];
-        dataFormat = dataFormat || assetType.runtimeFormat;
 
         let helperIndex = 0;
         let helper;
@@ -189,12 +217,12 @@ class ScratchStorage {
             helper = helpers[helperIndex++];
 
             if (helper) {
-                const loading = helper.load(assetType, assetId, dataFormat);
-                if (loading === null) {
+                const helperPromise = handler(helper);
+                if (helperPromise === null) {
                     return tryNextHelper();
                 }
                 // Note that other attempts may have logged errors; if this succeeds they will be suppressed.
-                return loading
+                return helperPromise
                     // TODO: maybe some types of error should prevent trying the next helper?
                     .catch(tryNextHelper);
             } else if (errors.length > 0) {
@@ -208,27 +236,6 @@ class ScratchStorage {
         };
 
         return tryNextHelper();
-    }
-
-    /**
-     * Store an asset by type & ID.
-     * @param {AssetType} assetType - The type of asset to fetch. This also determines which asset store to use.
-     * @param {?DataFormat} [dataFormat] - Optional: load this format instead of the AssetType's default.
-     * @param {Buffer} data - Data to store for the asset
-     * @param {?string} [assetId] - The ID of the asset to fetch: a project ID, MD5, etc.
-     * @return {Promise.<object>} A promise for asset metadata
-     */
-    store (assetType, dataFormat, data, assetId) {
-        dataFormat = dataFormat || assetType.runtimeFormat;
-        return new Promise(
-            (resolve, reject) =>
-                this.webHelper.store(assetType, dataFormat, data, assetId)
-                    .then(body => {
-                        this.builtinHelper._store(assetType, dataFormat, data, body.id);
-                        return resolve(body);
-                    })
-                    .catch(error => reject(error))
-        );
     }
 }
 
